@@ -16,6 +16,14 @@ pub struct Expression {
 }
 
 impl Expression {
+    pub fn new(num: usize, max: usize, modifier: i32) -> Self {
+        Self {
+            num,
+            max,
+            modifier,
+        }
+    }
+    
     pub fn execute(&self, rng: &mut impl Rng) -> ExpressionResult {
         let mut roller = Roller::new(rng, self.max);
 

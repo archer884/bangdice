@@ -1,3 +1,8 @@
+// FIXME: "Destructive trance" allows dice explosions on dMax or dMax - 1. The roller program
+// needs to support this mode somehow or another. Since the trance affects all dice in the "pool,"
+// maybe just make it a global option. `legend --trance 20 3d8+3` would then be a normal attack
+// roll for my test monk at level 5.
+
 mod error;
 mod output;
 mod roller;
@@ -8,6 +13,11 @@ use rand::Rng;
 use roller::Roller;
 use std::str::FromStr;
 
+#[derive(Copy, Clone, Debug)]
+pub struct Options {
+    pub destructive_trance: bool,
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Expression {
     num: usize,
@@ -17,22 +27,27 @@ pub struct Expression {
 
 impl Expression {
     pub fn new(num: usize, max: usize, modifier: i32) -> Self {
-        Self {
-            num,
-            max,
-            modifier,
-        }
+        Self { num, max, modifier }
     }
-    
-    pub fn execute(&self, rng: &mut impl Rng) -> ExpressionResult {
-        let mut roller = Roller::new(rng, self.max);
+
+    pub fn execute(&self, rng: &mut impl Rng, options: Options) -> ExpressionResult {
+        let mut roller = Roller::new(rng, self.max, options);
 
         // Roll the vanilla result of the expression with extra dice per advantage/disadvantage.
         let values: Vec<_> = roller.sample_iter().take(self.total_dice()).collect();
         // Apply advantage/disadvantage
         let mut values = self.apply_modifier(values);
         // Explode.
-        let explosions = values.iter().filter(|&&x| x == self.max).count();
+        let explosions = values
+            .iter()
+            .filter(|&&x| {
+                if options.destructive_trance {
+                    x >= self.max - 1
+                } else {
+                    x == self.max
+                }
+            })
+            .count();
         for _ in 0..explosions {
             values.extend(roller.explode(self.max));
         }

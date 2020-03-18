@@ -8,25 +8,32 @@ use rand::Rng;
 use roller::Roller;
 use std::str::FromStr;
 
-#[derive(Copy, Clone, Debug)]
-pub struct Options {
-    pub destructive_trance: bool,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Expression {
+    /// The number of dice to be rolled.
     num: usize,
+
+    /// The maximum value of the dice being rolled.
     max: usize,
+
+    /// Advantage or disadvantage modifier.
+    ///
+    /// 2d6+2 represents a roll of 2 six-sided dice with an advantage of two, meaning that four
+    /// dice will be rolled and the two best rolls kept.
     modifier: i32,
+
+    /// Explosion threshold.
+    ///
+    /// 2d6+2!5 represents a roll of 2 six-sided dice with an advantage of two and an explosion
+    /// threshold of five, meaning that rolls of 5 or 6 will explode. This can be used to make
+    /// rolls compatible with, for example, destructive trance. If not provided, this threshold
+    /// will be equal to max.
+    threshold: Option<usize>,
 }
 
 impl Expression {
-    pub fn new(num: usize, max: usize, modifier: i32) -> Self {
-        Self { num, max, modifier }
-    }
-
-    pub fn execute(&self, rng: &mut impl Rng, options: Options) -> ExpressionResult {
-        let mut roller = Roller::new(rng, self.max, options);
+    pub fn execute(&self, rng: &mut impl Rng) -> ExpressionResult {
+        let mut roller = Roller::new(rng, self.max);
 
         // Roll the vanilla result of the expression with extra dice per advantage/disadvantage.
         let mut values: Vec<_> = roller.sample_iter().take(self.total_dice()).collect();
@@ -34,20 +41,14 @@ impl Expression {
         let values = self.apply_modifier_window(&values);
 
         // Explode.
-        let explosions = values
-            .iter()
-            .filter(|&&x| {
-                if options.destructive_trance {
-                    x >= self.max - 1
-                } else {
-                    x == self.max
-                }
-            })
-            .count();
+        let explosions = match self.threshold {
+            None => 0,
+            Some(threshold) => values.iter().filter(|&&x| x >= threshold).count(),
+        };
 
         let mut values: Vec<_> = values.iter().cloned().collect();
         for _ in 0..explosions {
-            values.extend(roller.explode(self.max));
+            values.extend(roller.explode(self.threshold.unwrap_or(self.max)));
         }
 
         // Sort one last time for the hell of it.
@@ -74,25 +75,40 @@ impl FromStr for Expression {
     type Err = ParseExpressionError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.rfind(|x: char| x == '+' || x == '-') {
-            Some(idx) => {
-                let (num, max) = read_segments(&s[..idx])?;
-                Ok(Expression {
-                    num,
-                    max,
-                    modifier: s[(idx)..].parse()?,
-                })
-            }
+        let (threshold, s) = read_threshold(s)?;
+        let (modifier, s) = read_modifier(s)?;
+        let (num, max) = read_segments(s)?;
 
-            None => {
-                let (num, max) = read_segments(s)?;
-                Ok(Expression {
-                    num,
-                    max,
-                    modifier: 0,
-                })
-            }
+        Ok(Expression {
+            num,
+            max,
+            modifier: modifier.unwrap_or_default(),
+            threshold: threshold.map(|x| if x == 0 { max } else { x }),
+        })
+    }
+}
+
+fn read_threshold(s: &str) -> Result<(Option<usize>, &str), ParseExpressionError> {
+    match s.rfind('!') {
+        Some(idx) if idx + 1 < s.len() => {
+            let value = s[(idx + 1)..].parse()?;
+            Ok((Some(value), &s[..idx]))
         }
+
+        // In the event a BANG is provided without a threshold, return zero to signify that the
+        // max threshold should be applied.
+        Some(idx) => Ok((Some(0), &s[..idx])),
+        _ => Ok((None, s)),
+    }
+}
+
+fn read_modifier(s: &str) -> Result<(Option<i32>, &str), ParseExpressionError> {
+    match s.rfind(|c| c == '+' || c == '-') {
+        Some(idx) => {
+            let value = s[idx..].parse()?;
+            Ok((Some(value), &s[..idx]))
+        }
+        _ => Ok((None, s)),
     }
 }
 
@@ -120,30 +136,68 @@ mod tests {
     use super::Expression;
 
     #[test]
-    fn can_parse_segments() {
+    fn can_parse() {
         assert_eq!(
             Ok(Expression {
                 num: 1,
                 max: 6,
-                modifier: 2
+                modifier: 2,
+                threshold: None,
             }),
             "6+2".parse()
         );
+
         assert_eq!(
             Ok(Expression {
                 num: 2,
                 max: 6,
-                modifier: -2
+                modifier: -2,
+                threshold: None,
             }),
             "2d6-2".parse()
         );
+
         assert_eq!(
             Ok(Expression {
                 num: 2,
                 max: 6,
-                modifier: 0
+                modifier: 0,
+                threshold: None,
             }),
             "2d6".parse()
+        );
+    }
+
+    #[test]
+    fn can_parse_with_threshold() {
+        assert_eq!(
+            Ok(Expression {
+                num: 2,
+                max: 6,
+                modifier: 0,
+                threshold: Some(5)
+            }),
+            "2d6!5".parse()
+        );
+
+        assert_eq!(
+            Ok(Expression {
+                num: 2,
+                max: 6,
+                modifier: 2,
+                threshold: Some(5)
+            }),
+            "2d6+2!5".parse()
+        );
+
+        assert_eq!(
+            Ok(Expression {
+                num: 2,
+                max: 6,
+                modifier: 2,
+                threshold: Some(6)
+            }),
+            "2d6+2!".parse()
         );
     }
 }

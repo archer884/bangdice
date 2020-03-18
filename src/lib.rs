@@ -1,8 +1,3 @@
-// FIXME: "Destructive trance" allows dice explosions on dMax or dMax - 1. The roller program
-// needs to support this mode somehow or another. Since the trance affects all dice in the "pool,"
-// maybe just make it a global option. `legend --trance 20 3d8+3` would then be a normal attack
-// roll for my test monk at level 5.
-
 mod error;
 mod output;
 mod roller;
@@ -34,9 +29,10 @@ impl Expression {
         let mut roller = Roller::new(rng, self.max, options);
 
         // Roll the vanilla result of the expression with extra dice per advantage/disadvantage.
-        let values: Vec<_> = roller.sample_iter().take(self.total_dice()).collect();
-        // Apply advantage/disadvantage
-        let mut values = self.apply_modifier(values);
+        let mut values: Vec<_> = roller.sample_iter().take(self.total_dice()).collect();
+        values.sort_unstable();
+        let values = self.apply_modifier_window(&values);
+
         // Explode.
         let explosions = values
             .iter()
@@ -48,6 +44,8 @@ impl Expression {
                 }
             })
             .count();
+
+        let mut values: Vec<_> = values.iter().cloned().collect();
         for _ in 0..explosions {
             values.extend(roller.explode(self.max));
         }
@@ -61,16 +59,13 @@ impl Expression {
         self.num + self.modifier.abs() as usize
     }
 
-    fn apply_modifier(&self, mut values: Vec<usize>) -> Vec<usize> {
-        values.sort_unstable();
+    fn apply_modifier_window<'a>(&self, values: &'a [usize]) -> &'a [usize] {
         match self.modifier {
             0 => values,
-            x if x > 0 => values.into_iter().skip(self.modifier as usize).collect(),
-            x if x < 0 => values.into_iter().take(self.num).collect(),
+            x if x > 0 => &values[(x as usize)..],
+            x if x < 0 => &values[..(values.len() - (x.abs() as usize))],
 
-            // For some stupid reason, the compiler doesn't get that x can be 0, greater than
-            // zero, or less than zero. Whatever, rustc, you do you.
-            _ => unreachable!(),
+            _ => unreachable!("Integers are equal to, less than, or greater than 0"),
         }
     }
 }

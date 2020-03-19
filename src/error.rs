@@ -9,7 +9,7 @@ pub enum ParseExpressionError {
 
     /// Indicates a failure to parse an integer.
     Int(ParseIntError),
-    
+
     /// Thrown in the event someone tries to roll a one-sided die.
     Invalid,
 

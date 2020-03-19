@@ -79,6 +79,10 @@ impl FromStr for Expression {
         let (modifier, s) = read_modifier(s)?;
         let (num, max) = read_segments(s)?;
 
+        if max == 1 {
+            return Err(ParseExpressionError::Invalid);
+        }
+
         Ok(Expression {
             num,
             max,
